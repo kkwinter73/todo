@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -16,8 +17,9 @@ type Todo struct {
 
 // 構造体の定義　（ 一覧表示したり、タスクを追加したりするようのもの）
 type TodoList struct {
-	Todos  []Todo `json:"Todos"`
-	NextID int    `json:"next_id"`
+	mu     sync.Mutex // ← 追加。小文字なので外部からは見えない
+	Todos  []Todo     `json:"Todos"`
+	NextID int        `json:"next_id"`
 }
 
 // 初期化関数（メソッドではない）　レシーバないでしょ
@@ -30,6 +32,9 @@ func NewTodoList() *TodoList {
 
 // タスク追加用
 func (tl *TodoList) Add(title string) Todo {
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
 	todo := Todo{
 		ID:        tl.NextID,
 		Title:     title,
@@ -44,11 +49,21 @@ func (tl *TodoList) Add(title string) Todo {
 
 // 一覧表示用
 func (tl *TodoList) List() []Todo {
-	return tl.Todos
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
+	// 内部スライスをそのまま返すと、ロック外で触られて危険。
+	// コピーを返すことで呼び出し元が安全に扱える。
+	result := make([]Todo, len(tl.Todos))
+	copy(result, tl.Todos)
+	return result
 }
 
 // タスク完了反映用
 func (tl *TodoList) Done(id int) error {
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
 	for i := range tl.Todos {
 		if tl.Todos[i].ID == id {
 			if tl.Todos[i].Done {
@@ -63,6 +78,9 @@ func (tl *TodoList) Done(id int) error {
 
 // タスク削除用
 func (tl *TodoList) Delete(id int) error {
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
 	for i := range tl.Todos {
 		if tl.Todos[i].ID == id {
 			tl.Todos = append(tl.Todos[:i], tl.Todos[i+1:]...)
@@ -71,4 +89,18 @@ func (tl *TodoList) Delete(id int) error {
 	}
 
 	return errors.New("指定されたIDのタスクがありません")
+}
+
+// Snapshot - Save() でJSON化するためのスナップショットを返す。
+// これもロック内で作る必要がある（Save中にAddが走るとレースする）。
+func (tl *TodoList) Snapshot() TodoList {
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
+	snapshot := TodoList{
+		Todos:  make([]Todo, len(tl.Todos)),
+		NextID: tl.NextID,
+	}
+	copy(snapshot.Todos, tl.Todos)
+	return snapshot
 }
