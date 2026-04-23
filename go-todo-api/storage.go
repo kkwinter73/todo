@@ -11,13 +11,20 @@ const defaultFilePath = "todos.json"
 
 // ToListをjson変換してファイルに保存する
 func Save(tl *TodoList, filePath string) error {
-	// ロック取得中の短時間でスナップショットを取り、それをJSON化する
 	snapshot := tl.Snapshot()
 	data, err := json.MarshalIndent(&snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filePath, data, 0644)
+
+	// 1. 一時ファイルに書き込む
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+
+	// 2. rename で本ファイルに置き換える（アトミック）
+	return os.Rename(tmpPath, filePath)
 }
 
 // jsonファイル読み込みして返す
