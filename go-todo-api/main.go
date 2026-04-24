@@ -6,18 +6,22 @@ import (
 )
 
 const (
-	serverAddr      = ":8080"
-	defaultFilePath = "todos.json"
+	serverAddr = ":8080"
+
+	// PostgreSQL 接続文字列
+	// 書式: postgres://ユーザー:パスワード@ホスト:ポート/DB名?オプション
+	connString = "postgres://todouser:todopassword@localhost:5432/tododb?sslmode=disable"
 )
 
 func main() {
-	// 1. ストレージを初期化（ファイル実装）
-	storage, err := NewFileStorage(defaultFilePath)
+	// 1. ストレージを初期化（PostgreSQL実装に変更）
+	storage, err := NewPostgresStorage(connString)
 	if err != nil {
 		log.Fatalf("ストレージの初期化に失敗しました: %v", err)
 	}
+	defer storage.Close()
 
-	// 2. ハンドラを作成（Storage interface を渡す = 真のDI）
+	// 2. ハンドラを作成（interfaceとして渡す＝コード変更なし）
 	handler := NewTodoHandler(storage)
 
 	// 3. ルーターを作成
