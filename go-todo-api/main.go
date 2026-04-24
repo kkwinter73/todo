@@ -5,19 +5,22 @@ import (
 	"net/http"
 )
 
-const serverAddr = ":8080"
+const (
+	serverAddr      = ":8080"
+	defaultFilePath = "todos.json"
+)
 
 func main() {
-	// 1. 起動時にファイルからデータを読み込む
-	todoList, err := Load(defaultFilePath)
+	// 1. ストレージを初期化（ファイル実装）
+	storage, err := NewFileStorage(defaultFilePath)
 	if err != nil {
-		log.Fatalf("データの読み込みに失敗しました: %v", err)
+		log.Fatalf("ストレージの初期化に失敗しました: %v", err)
 	}
 
-	// 2. ハンドラを作成（TodoList と ファイルパスを渡す = DI）
-	handler := NewTodoHandler(todoList, defaultFilePath)
+	// 2. ハンドラを作成（Storage interface を渡す = 真のDI）
+	handler := NewTodoHandler(storage)
 
-	// 3. ルーターを作成（ハンドラを渡す = DI）
+	// 3. ルーターを作成
 	router := NewRouter(handler)
 
 	// 4. HTTPサーバーを起動

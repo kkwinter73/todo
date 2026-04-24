@@ -2,23 +2,28 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// TodoHandler はHTTPハンドラが使うTodoListへの参照を持つ構造体
+// ============================================
+// TodoHandler - HTTPハンドラ
+// ============================================
+// Storage interface にだけ依存する。
+// ファイル実装かDB実装かは知らない（DIP＝依存性逆転の原則）。
 type TodoHandler struct {
-	todoList *TodoList
-	filePath string
+	storage Storage
 }
 
-// NewTodoHandler はハンドラを初期化する（DI）
-func NewTodoHandler(tl *TodoList, filePath string) *TodoHandler {
+// NewTodoHandler はハンドラを初期化する。
+// 引数で Storage interface を受け取る。
+// 「何の実装か」は呼び出し元（main.go）が決める。
+func NewTodoHandler(s Storage) *TodoHandler {
 	return &TodoHandler{
-		todoList: tl,
-		filePath: filePath,
+		storage: s,
 	}
 }
 
@@ -26,7 +31,11 @@ func NewTodoHandler(tl *TodoList, filePath string) *TodoHandler {
 // GET /todos - タスク一覧取得
 // ============================================
 func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
-	todos := h.todoList.List()
+	todos, err := h.storage.GetAll()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "データ取得に失敗しました")
+		return
+	}
 	writeJSON(w, http.StatusOK, todos)
 }
 
@@ -34,33 +43,26 @@ func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
 // POST /todos - タスク追加
 // ============================================
 func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
-	// リクエストボディを受け取る構造体を定義（この関数内でしか使わない）
 	var req struct {
 		Title string `json:"title"`
 	}
 
-	// JSONボディを構造体にデコード
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "リクエストボディが不正です")
 		return
 	}
 
-	// バリデーション
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "titleは必須です")
 		return
 	}
 
-	// ビジネスロジックを呼び出す
-	todo := h.todoList.Add(req.Title)
-
-	// ファイルに保存
-	if err := Save(h.todoList, h.filePath); err != nil {
-		writeError(w, http.StatusInternalServerError, "保存に失敗しました")
+	todo, err := h.storage.Create(req.Title)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "作成に失敗しました")
 		return
 	}
 
-	// 作成したTodoを返す（201 Created）
 	writeJSON(w, http.StatusCreated, todo)
 }
 
@@ -74,18 +76,18 @@ func (h *TodoHandler) DoneTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.todoList.Done(id); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
+	// sentinel error をステータスコードに変換
+	err = h.storage.Done(id)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrTodoNotFound):
+		writeError(w, http.StatusNotFound, "タスクが見つかりません")
+	case errors.Is(err, ErrAlreadyDone):
+		writeError(w, http.StatusConflict, "タスクは既に完了しています")
+	default:
+		writeError(w, http.StatusInternalServerError, "処理に失敗しました")
 	}
-
-	if err := Save(h.todoList, h.filePath); err != nil {
-		writeError(w, http.StatusInternalServerError, "保存に失敗しました")
-		return
-	}
-
-	// 成功したがボディは返さない場合は 204 No Content
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // ============================================
@@ -98,38 +100,32 @@ func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.todoList.Delete(id); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
+	err = h.storage.Delete(id)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrTodoNotFound):
+		writeError(w, http.StatusNotFound, "タスクが見つかりません")
+	default:
+		writeError(w, http.StatusInternalServerError, "処理に失敗しました")
 	}
-
-	if err := Save(h.todoList, h.filePath); err != nil {
-		writeError(w, http.StatusInternalServerError, "保存に失敗しました")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // ============================================
-// ヘルパー関数
+// ヘルパー関数（変更なし）
 // ============================================
 
-// URLパラメータからIDを取り出して数値に変換する
-// 例: /todos/1 → 1
 func parseIDFromURL(r *http.Request) (int, error) {
 	idStr := chi.URLParam(r, "id")
 	return strconv.Atoi(idStr)
 }
 
-// JSONレスポンスを書き込む共通関数
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
-// エラーレスポンスを書き込む共通関数
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
