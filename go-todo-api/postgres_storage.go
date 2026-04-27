@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -40,18 +41,18 @@ func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 // ============================================
 // Storage interface の実装
 // ============================================
+// QueryContext / ExecContext を使い、ctx をDBドライバまで伝える。
+// クライアント切断時に発行中のSQLもキャンセルされる。
 
-// GetAll は全Todoを取得する
-func (ps *PostgresStorage) GetAll() ([]Todo, error) {
+func (ps *PostgresStorage) GetAll(ctx context.Context) ([]Todo, error) {
 	query := `SELECT id, title, done, created_at FROM todos ORDER BY id`
 
-	rows, err := ps.db.Query(query)
+	rows, err := ps.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("SELECT失敗: %w", err)
 	}
 	defer rows.Close()
 
-	// 結果を []Todo にマッピングする
 	todos := []Todo{}
 	for rows.Next() {
 		var t Todo
@@ -69,9 +70,7 @@ func (ps *PostgresStorage) GetAll() ([]Todo, error) {
 	return todos, nil
 }
 
-// Create は新しいTodoを作成する
-// プリペアドステートメント（$1）でSQLインジェクション対策
-func (ps *PostgresStorage) Create(title string) (Todo, error) {
+func (ps *PostgresStorage) Create(ctx context.Context, title string) (Todo, error) {
 	query := `
 		INSERT INTO todos (title)
 		VALUES ($1)
@@ -79,9 +78,7 @@ func (ps *PostgresStorage) Create(title string) (Todo, error) {
 	`
 
 	var t Todo
-	// QueryRow + Scan で「INSERT後の値を取得」する
-	// PostgreSQL の RETURNING 句が便利
-	err := ps.db.QueryRow(query, title).Scan(&t.ID, &t.Title, &t.Done, &t.CreatedAt)
+	err := ps.db.QueryRowContext(ctx, query, title).Scan(&t.ID, &t.Title, &t.Done, &t.CreatedAt)
 	if err != nil {
 		return Todo{}, fmt.Errorf("INSERT失敗: %w", err)
 	}
@@ -89,11 +86,10 @@ func (ps *PostgresStorage) Create(title string) (Todo, error) {
 	return t, nil
 }
 
-// Done は指定IDのTodoを完了にする
-func (ps *PostgresStorage) Done(id int) error {
-	// まずタスクが存在するか・既に完了済みかをチェックする
+func (ps *PostgresStorage) Done(ctx context.Context, id int) error {
 	var done bool
-	err := ps.db.QueryRow(
+	err := ps.db.QueryRowContext(
+		ctx,
 		`SELECT done FROM todos WHERE id = $1`,
 		id,
 	).Scan(&done)
@@ -109,8 +105,8 @@ func (ps *PostgresStorage) Done(id int) error {
 		return ErrAlreadyDone
 	}
 
-	// 完了にUPDATE
-	_, err = ps.db.Exec(
+	_, err = ps.db.ExecContext(
+		ctx,
 		`UPDATE todos SET done = TRUE WHERE id = $1`,
 		id,
 	)
@@ -120,9 +116,9 @@ func (ps *PostgresStorage) Done(id int) error {
 	return nil
 }
 
-// Delete は指定IDのTodoを削除する
-func (ps *PostgresStorage) Delete(id int) error {
-	result, err := ps.db.Exec(
+func (ps *PostgresStorage) Delete(ctx context.Context, id int) error {
+	result, err := ps.db.ExecContext(
+		ctx,
 		`DELETE FROM todos WHERE id = $1`,
 		id,
 	)

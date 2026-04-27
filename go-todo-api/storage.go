@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,20 +12,18 @@ import (
 // ============================================
 // Storage interface - 永続化の契約
 // ============================================
-// この interface を満たせば、ファイルでもDBでもメモリでも使える。
-// ハンドラはこの interface にだけ依存する。
+// 全メソッドが context.Context を第1引数に取る。
+// HTTPリクエストのキャンセル・タイムアウトを下流まで伝えるため。
 type Storage interface {
-	GetAll() ([]Todo, error)
-	Create(title string) (Todo, error)
-	Done(id int) error
-	Delete(id int) error
+	GetAll(ctx context.Context) ([]Todo, error)
+	Create(ctx context.Context, title string) (Todo, error)
+	Done(ctx context.Context, id int) error
+	Delete(ctx context.Context, id int) error
 }
 
 // ============================================
-// sentinel error - エラーの種類を識別する
+// sentinel error
 // ============================================
-// errors.Is() で判定できるように、パッケージ変数として定義する。
-// 文字列比較でエラー判別すると、多言語化した瞬間に壊れるのでNG。
 var (
 	ErrTodoNotFound = errors.New("todo not found")
 	ErrAlreadyDone  = errors.New("todo already done")
@@ -108,9 +107,15 @@ func (fs *FileStorage) save() error {
 // ============================================
 // Storage interface の実装
 // ============================================
+// FileStorage はメモリ操作が中心なので ctx での中断は最小限にする。
+// 入口で ctx.Err() をチェックすれば、既にキャンセルされたリクエストの
+// 処理を始めずに済む。
 
-// GetAll は全Todoを返す（防御的コピー）
-func (fs *FileStorage) GetAll() ([]Todo, error) {
+func (fs *FileStorage) GetAll(ctx context.Context) ([]Todo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -119,8 +124,11 @@ func (fs *FileStorage) GetAll() ([]Todo, error) {
 	return result, nil
 }
 
-// Create は新しいTodoを作成する
-func (fs *FileStorage) Create(title string) (Todo, error) {
+func (fs *FileStorage) Create(ctx context.Context, title string) (Todo, error) {
+	if err := ctx.Err(); err != nil {
+		return Todo{}, err
+	}
+
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -139,8 +147,11 @@ func (fs *FileStorage) Create(title string) (Todo, error) {
 	return todo, nil
 }
 
-// Done は指定IDのTodoを完了にする
-func (fs *FileStorage) Done(id int) error {
+func (fs *FileStorage) Done(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -156,8 +167,11 @@ func (fs *FileStorage) Done(id int) error {
 	return ErrTodoNotFound
 }
 
-// Delete は指定IDのTodoを削除する
-func (fs *FileStorage) Delete(id int) error {
+func (fs *FileStorage) Delete(ctx context.Context, id int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 

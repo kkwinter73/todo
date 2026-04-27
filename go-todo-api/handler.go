@@ -9,29 +9,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ============================================
-// TodoHandler - HTTPハンドラ
-// ============================================
-// Storage interface にだけ依存する。
-// ファイル実装かDB実装かは知らない（DIP＝依存性逆転の原則）。
 type TodoHandler struct {
 	storage Storage
 }
 
-// NewTodoHandler はハンドラを初期化する。
-// 引数で Storage interface を受け取る。
-// 「何の実装か」は呼び出し元（main.go）が決める。
 func NewTodoHandler(s Storage) *TodoHandler {
 	return &TodoHandler{
 		storage: s,
 	}
 }
 
-// ============================================
-// GET /todos - タスク一覧取得
-// ============================================
+// GET /todos
 func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
-	todos, err := h.storage.GetAll()
+	todos, err := h.storage.GetAll(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "データ取得に失敗しました")
 		return
@@ -57,7 +47,7 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	todo, err := h.storage.Create(req.Title)
+	todo, err := h.storage.Create(r.Context(), req.Title)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "作成に失敗しました")
 		return
@@ -76,8 +66,7 @@ func (h *TodoHandler) DoneTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// sentinel error をステータスコードに変換
-	err = h.storage.Done(id)
+	err = h.storage.Done(r.Context(), id)
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
@@ -100,7 +89,7 @@ func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.storage.Delete(id)
+	err = h.storage.Delete(r.Context(), id)
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusNoContent)
