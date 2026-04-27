@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-
-	"github.com/go-chi/chi/v5"
 )
 
 type TodoHandler struct {
@@ -29,9 +27,7 @@ func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, todos)
 }
 
-// ============================================
-// POST /todos - タスク追加
-// ============================================
+// POST /todos
 func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title string `json:"title"`
@@ -56,9 +52,7 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, todo)
 }
 
-// ============================================
-// PATCH /todos/{id}/done - タスク完了
-// ============================================
+// PATCH /todos/{id}/done
 func (h *TodoHandler) DoneTodo(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDFromURL(r)
 	if err != nil {
@@ -79,9 +73,7 @@ func (h *TodoHandler) DoneTodo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ============================================
-// DELETE /todos/{id} - タスク削除
-// ============================================
+// DELETE /todos/{id}
 func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDFromURL(r)
 	if err != nil {
@@ -100,12 +92,10 @@ func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ============================================
-// ヘルパー関数（変更なし）
-// ============================================
-
+// parseIDFromURL はパスパラメータ {id} を整数として取り出す。
+// Go 1.22+ の r.PathValue を使うので chi.URLParam は不要になった。
 func parseIDFromURL(r *http.Request) (int, error) {
-	idStr := chi.URLParam(r, "id")
+	idStr := r.PathValue("id")
 	return strconv.Atoi(idStr)
 }
 
